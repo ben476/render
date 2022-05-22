@@ -24,7 +24,11 @@ interface DirectoryListItem {
 
 export const generateHTMLDirectoryList = (
 	breadcrumbs: DirectoryListBreadcrumb[],
-	items: DirectoryListItem[]
+	items: DirectoryListItem[],
+	pagination?: {
+		loadMoreURL: string;
+		loadAllURL: string;
+	}
 ): string => `<!DOCTYPE html>
 <html lang="en">
 	<head>
@@ -52,7 +56,8 @@ export const generateHTMLDirectoryList = (
 				margin: 0;
 				padding: 0;
 				border: 0;
-				font-family: sans-serif;
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+					Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 				color: var(--text);
 			}
 			a {
@@ -77,11 +82,27 @@ export const generateHTMLDirectoryList = (
 				flex-direction: column;
 				max-height: 100vh;
 			}
-			#breadcrumbs {
+			header {
 				display: flex;
 				flex-wrap: wrap;
-				gap: 10px;
+			}
+			#breadcrumbs {
+				display: inline;
+				overflow-wrap: break-word;
 				padding: var(--spacing);
+				max-width: 80%;
+			}
+			${
+				!!pagination
+					? `#pagination {
+				display: flex;
+				flex-wrap: wrap;
+				gap: calc(var(--spacing) / 2);
+				padding: var(--spacing);
+				margin-left: auto;
+				font-style: italic;
+			}`
+					: ""
 			}
 			#list {
 				flex: 1;
@@ -168,13 +189,23 @@ export const generateHTMLDirectoryList = (
 				</defs>
 			</svg>
 		</div>
-		<h1 id="breadcrumbs">
-			${breadcrumbs.map((breadcrumb) =>
-				breadcrumb.url
-					? `<span>${breadcrumb.name} /</span>`
-					: `<a href="${breadcrumb.url}">${breadcrumb.name} /</a>`
-			)}
-		</h1>
+		<header>
+			<h1 id="breadcrumbs">
+				${breadcrumbs.map((breadcrumb) =>
+					breadcrumb.url
+						? `<span>${breadcrumb.name} /</span>`
+						: `<a href="${breadcrumb.url}">${breadcrumb.name} /</a>`
+				)}
+			</h1>
+			${
+				!!pagination
+					? `<nav id="pagination">
+				<a href="${pagination.loadMoreURL}">Load more</a>
+				<a href="#${pagination.loadAllURL}">Load all</a>
+			</nav>`
+					: ""
+			}
+		</header>
 		<main id="list">
 			${items.map((item) => {
 				let iconID = item.folder ? "folder-icon" : "file-icon";
