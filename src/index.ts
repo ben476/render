@@ -2,11 +2,27 @@ import parseRange from "range-parser";
 
 interface Env {
   R2_BUCKET: R2Bucket,
-  CACHE_CONTROL: string
+  CACHE_CONTROL?: string,
+  PATH_PREFIX?: string
+}
+
+type ParsedRange = { offset: number, length: number } | { suffix: number };
+
+function rangeHasLength(object: ParsedRange): object is { offset: number, length: number } {
+  return (<{offset: number, length: number}>object).length !== undefined;
 }
 
 function hasBody(object: R2Object | R2ObjectBody): object is R2ObjectBody {
   return (<R2ObjectBody>object).body !== undefined;
+}
+
+function hasSuffix(range: ParsedRange): range is { suffix: number } {
+  return (<{ suffix: number }>range).suffix !== undefined;
+}
+
+function getRangeHeader(range: ParsedRange, fileSize: number): string {
+  return `bytes ${hasSuffix(range) ? (fileSize - range.suffix) : range.offset}-${hasSuffix(range) ? fileSize - 1 :
+    (range.offset + range.length - 1)}/${fileSize}`;
 }
 
 export default {
@@ -25,11 +41,13 @@ export default {
 
     const cache = caches.default;
     let response = await cache.match(request);
-    let range: R2Range | undefined;
+
+    // Since we produce this result from the request, we don't need to strictly use an R2Range
+    let range: ParsedRange | undefined;
 
     if (!response || !response.ok) {
       console.warn("Cache miss");
-      const path = decodeURIComponent(url.pathname.substring(1));
+      const path = (env.PATH_PREFIX || "") + decodeURIComponent(url.pathname.substring(1));
 
       let file: R2Object | R2ObjectBody | null | undefined;
 
@@ -43,7 +61,7 @@ export default {
           // R2 only supports 1 range at the moment, reject if there is more than one
           if (parsedRanges !== -1 && parsedRanges !== -2 && parsedRanges.length === 1 && parsedRanges.type === "bytes") {
             let firstRange = parsedRanges[0];
-            range = {
+            range = file.size === (firstRange.end + 1) ? { suffix: file.size - firstRange.start } : {
               offset: firstRange.start,
               length: firstRange.end - firstRange.start + 1
             }
@@ -106,8 +124,8 @@ export default {
         return new Response("File Not Found", { status: 404 });
       }
 
-      response = new Response(hasBody(file) ? file.body : null, {
-        status: (file?.size || 0) === 0 ? 204 : (range ? 206 : 200),
+      response = new Response((hasBody(file) && file.size !== 0) ? file.body : null, {
+        status: range ? 206 : 200,
         headers: {
           "accept-ranges": "bytes",
 
@@ -120,13 +138,14 @@ export default {
           "content-type": file.httpMetadata?.contentType ?? "application/octet-stream",
           "content-language": file.httpMetadata?.contentLanguage ?? "",
           "content-disposition": file.httpMetadata?.contentDisposition ?? "",
-          "content-range": range ? `bytes ${range.offset}-${range.offset + range.length - 1}/${file.size}` : "",
+          "content-range": range ? getRangeHeader(range, file.size) : "",
+          "content-length": (range ? (rangeHasLength(range) ? range.length : range.suffix) : file.size).toString()
         }
       });
-    }
 
-    if (request.method === "GET" && !range)
-      ctx.waitUntil(cache.put(request, response.clone()));
+      if (request.method === "GET" && !range)
+        ctx.waitUntil(cache.put(request, response.clone()));
+    }
 
     return response;
   },
